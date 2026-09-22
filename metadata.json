@@ -1,0 +1,6 @@
+{
+  "name": "AI Customer Support & Appointment Scheduling Agent",
+  "description": "Multi-purpose customer support and appointment scheduling agent featuring intent routing, separate conversational flows, function calling, state tracking, and human escalation guardrails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
