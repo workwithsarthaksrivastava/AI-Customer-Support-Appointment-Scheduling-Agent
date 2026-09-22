@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
+import Groq from 'groq-sdk';
 
 dotenv.config();
 
@@ -166,179 +166,196 @@ const BUSINESS_INFO: Record<string, string> = {
   general: 'Lumina Care & Wellness is an appointment-based multidisciplinary clinic and salon providing medical, rehabilitation, dental, and wellness services.',
 };
 
-// --- Function Calling Declarations for Gemini ---
+// --- Function Calling Declarations for Groq ---
 
-const lookupAppointmentDeclaration: FunctionDeclaration = {
-  name: 'lookup_appointment',
-  description: 'Lookup an existing appointment by booking ID (e.g. APT-101) or customer name/phone.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      booking_id: {
-        type: Type.STRING,
-        description: 'The booking reference ID, e.g. APT-101 or APT-102.',
-      },
-      customer_name: {
-        type: Type.STRING,
-        description: 'The full or partial name of the customer.',
-      },
-      contact: {
-        type: Type.STRING,
-        description: 'The customer phone number or email.',
+const groqTools: Groq.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'lookup_appointment',
+      description: 'Lookup an existing appointment by booking ID (e.g. APT-101) or customer name/phone.',
+      parameters: {
+        type: 'object',
+        properties: {
+          booking_id: {
+            type: 'string',
+            description: 'The booking reference ID, e.g. APT-101 or APT-102.',
+          },
+          customer_name: {
+            type: 'string',
+            description: 'The full or partial name of the customer.',
+          },
+          contact: {
+            type: 'string',
+            description: 'The customer phone number or email.',
+          },
+        },
       },
     },
   },
-};
-
-const getAvailableSlotsDeclaration: FunctionDeclaration = {
-  name: 'get_available_slots',
-  description: 'Query available appointment dates and open time slots for a given service or date.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      date: {
-        type: Type.STRING,
-        description: 'The target date in YYYY-MM-DD or human phrase like "tomorrow" or "Friday".',
-      },
-      service_type: {
-        type: Type.STRING,
-        description: 'The name or category of the service.',
-      },
-    },
-    required: ['date'],
-  },
-};
-
-const bookAppointmentDeclaration: FunctionDeclaration = {
-  name: 'book_appointment',
-  description: 'Create and confirm a new customer appointment.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      customer_name: {
-        type: Type.STRING,
-        description: 'Full name of the customer.',
-      },
-      contact: {
-        type: Type.STRING,
-        description: 'Customer phone number or email address.',
-      },
-      service_type: {
-        type: Type.STRING,
-        description: 'The exact service being booked.',
-      },
-      date: {
-        type: Type.STRING,
-        description: 'The date for the appointment (YYYY-MM-DD or readable date).',
-      },
-      time_slot: {
-        type: Type.STRING,
-        description: 'The selected time slot, e.g. "10:00 AM" or "02:00 PM".',
-      },
-      notes: {
-        type: Type.STRING,
-        description: 'Any special requests or doctor preferences.',
+  {
+    type: 'function',
+    function: {
+      name: 'get_available_slots',
+      description: 'Query available appointment dates and open time slots for a given service or date.',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: {
+            type: 'string',
+            description: 'The target date in YYYY-MM-DD or readable phrase like "tomorrow" or "Friday".',
+          },
+          service_type: {
+            type: 'string',
+            description: 'The name or category of the service.',
+          },
+        },
+        required: ['date'],
       },
     },
-    required: ['customer_name', 'contact', 'service_type', 'date', 'time_slot'],
   },
-};
-
-const rescheduleAppointmentDeclaration: FunctionDeclaration = {
-  name: 'reschedule_appointment',
-  description: 'Modify the date and/or time slot of an existing appointment.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      booking_id: {
-        type: Type.STRING,
-        description: 'The ID of the existing appointment, e.g. APT-101.',
-      },
-      new_date: {
-        type: Type.STRING,
-        description: 'The new appointment date.',
-      },
-      new_time_slot: {
-        type: Type.STRING,
-        description: 'The new appointment time slot.',
-      },
-      reason: {
-        type: Type.STRING,
-        description: 'Optional reason for rescheduling.',
+  {
+    type: 'function',
+    function: {
+      name: 'book_appointment',
+      description: 'Create and confirm a new customer appointment in the scheduling system.',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_name: {
+            type: 'string',
+            description: 'Full name of the customer.',
+          },
+          contact: {
+            type: 'string',
+            description: 'Customer phone number or email address.',
+          },
+          service_type: {
+            type: 'string',
+            description: 'The exact service being booked.',
+          },
+          date: {
+            type: 'string',
+            description: 'The date for the appointment (YYYY-MM-DD or readable date).',
+          },
+          time_slot: {
+            type: 'string',
+            description: 'The selected time slot, e.g. "10:00 AM" or "02:00 PM".',
+          },
+          notes: {
+            type: 'string',
+            description: 'Any special requests or doctor preferences.',
+          },
+        },
+        required: ['customer_name', 'contact', 'service_type', 'date', 'time_slot'],
       },
     },
-    required: ['booking_id', 'new_date', 'new_time_slot'],
   },
-};
-
-const cancelAppointmentDeclaration: FunctionDeclaration = {
-  name: 'cancel_appointment',
-  description: 'Cancel an existing confirmed appointment.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      booking_id: {
-        type: Type.STRING,
-        description: 'The appointment ID to cancel.',
-      },
-      reason: {
-        type: Type.STRING,
-        description: 'Reason provided by customer for cancellation.',
+  {
+    type: 'function',
+    function: {
+      name: 'reschedule_appointment',
+      description: 'Modify the date and/or time slot of an existing appointment.',
+      parameters: {
+        type: 'object',
+        properties: {
+          booking_id: {
+            type: 'string',
+            description: 'The ID of the existing appointment, e.g. APT-101.',
+          },
+          new_date: {
+            type: 'string',
+            description: 'The new appointment date.',
+          },
+          new_time_slot: {
+            type: 'string',
+            description: 'The new appointment time slot.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Optional reason for rescheduling.',
+          },
+        },
+        required: ['booking_id', 'new_date', 'new_time_slot'],
       },
     },
-    required: ['booking_id'],
   },
-};
-
-const escalateToHumanDeclaration: FunctionDeclaration = {
-  name: 'escalate_to_human',
-  description: 'Trigger escalation guardrail when the user expresses strong frustration/anger, complex dispute, billing grievance, or explicitly demands a supervisor/human.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      customer_name: {
-        type: Type.STRING,
-        description: 'Customer name if known.',
-      },
-      contact: {
-        type: Type.STRING,
-        description: 'Customer contact details if known.',
-      },
-      reason: {
-        type: Type.STRING,
-        description: 'Specific reason for triggering the escalation guardrail.',
-      },
-      urgency_level: {
-        type: Type.STRING,
-        description: 'Urgency level: low, medium, high, or critical.',
-      },
-      sentiment: {
-        type: Type.STRING,
-        description: 'User sentiment: frustrated, angry, or complex_inquiry.',
-      },
-      summary: {
-        type: Type.STRING,
-        description: 'Brief executive summary of the conversation and user issue for the human agent.',
+  {
+    type: 'function',
+    function: {
+      name: 'cancel_appointment',
+      description: 'Cancel an existing confirmed appointment.',
+      parameters: {
+        type: 'object',
+        properties: {
+          booking_id: {
+            type: 'string',
+            description: 'The appointment ID to cancel.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Reason provided by customer for cancellation.',
+          },
+        },
+        required: ['booking_id'],
       },
     },
-    required: ['reason', 'urgency_level', 'summary'],
   },
-};
-
-const getBusinessInfoDeclaration: FunctionDeclaration = {
-  name: 'get_business_info',
-  description: 'Retrieve factual information about business hours, services, location, insurance, pricing, and cancellation policy.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      topic: {
-        type: Type.STRING,
-        description: 'The topic inquired: hours, location, pricing, cancellation_policy, insurance, or general.',
+  {
+    type: 'function',
+    function: {
+      name: 'escalate_to_human',
+      description: 'Trigger escalation guardrail when the user expresses strong frustration/anger, complex dispute, billing grievance, or explicitly demands a supervisor/human.',
+      parameters: {
+        type: 'object',
+        properties: {
+          customer_name: {
+            type: 'string',
+            description: 'Customer name if known.',
+          },
+          contact: {
+            type: 'string',
+            description: 'Customer contact details if known.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Specific reason for triggering the escalation guardrail.',
+          },
+          urgency_level: {
+            type: 'string',
+            description: 'Urgency level: low, medium, high, or critical.',
+          },
+          sentiment: {
+            type: 'string',
+            description: 'User sentiment: frustrated, angry, or complex_inquiry.',
+          },
+          summary: {
+            type: 'string',
+            description: 'Brief executive summary of the conversation and user issue for the human agent.',
+          },
+        },
+        required: ['reason', 'urgency_level', 'summary'],
       },
     },
-    required: ['topic'],
   },
-};
+  {
+    type: 'function',
+    function: {
+      name: 'get_business_info',
+      description: 'Retrieve factual information about business hours, services, location, insurance, pricing, and cancellation policy.',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: {
+            type: 'string',
+            description: 'The topic inquired: hours, location, pricing, cancellation_policy, insurance, or general.',
+          },
+        },
+        required: ['topic'],
+      },
+    },
+  },
+];
 
 // Tool execution implementation
 function executeTool(name: string, args: Record<string, any>) {
@@ -746,7 +763,7 @@ function analyzeUserIntentAndState(
   };
 }
 
-// Fallback deterministic conversational agent logic (when GEMINI_API_KEY is not configured or offline)
+// Fallback deterministic conversational agent logic (when GROQ_API_KEY is not configured or offline)
 function processFallbackAgent(
   userMessage: string,
   state: any,
@@ -1067,7 +1084,7 @@ app.post('/api/reset', (req, res) => {
   res.json({ success: true, message: 'Database reset to default demo data.' });
 });
 
-// Helper to construct role-specific System Instructions for Gemini
+// Helper to construct role-specific System Instructions for Groq
 function getSystemInstructionForRole(
   role: string = 'clinic_specialist',
   customInstruction: string = '',
@@ -1098,7 +1115,13 @@ Core Directives:
    - Call 'escalate_to_human' immediately when the user shows anger, billing disputes, medical emergency, or explicitly requests a supervisor.
 3. Conversation-State Memory: Remember parameters already collected across multi-turn history. Current extracted parameters: ${JSON.stringify(
     updatedState?.extractedParams || {}
-  )}. Never re-ask for details already in memory!`;
+  )}. Never re-ask for details already in memory!
+4. Knowledge Grounding: Always ground business answers strictly in the factual clinic profile above. Do not invent unapproved policies.
+5. Clean Text & Table Formatting:
+   - Always format responses using clean, standard Markdown.
+   - When listing services, options, or steps, use clean bullet points with bold titles (e.g., • **Comprehensive Dental Cleaning** – $120, 45 min).
+   - When presenting comparison tables, use standard markdown table syntax with proper header rows (| Header 1 | Header 2 |) and separator rows (|---|---|).
+   - Keep paragraphs brief and well-spaced for maximum legibility.`;
 
   switch (role) {
     case 'concierge':
@@ -1133,10 +1156,9 @@ Tone: Empathetic, supportive, professional, and clear. Guide patients smoothly t
   }
 }
 
-// Model Selection Routing per user specifications:
-// - gemini-3.1-pro-preview for particularly complex tasks
-// - gemini-3.5-flash for general tasks
-// - gemini-3.1-flash-lite for tasks that should happen fast
+// Model Selection Routing for Groq
+const DEFAULT_GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+
 function selectModelForTask(
   requestedModel: string = 'auto',
   message: string,
@@ -1146,7 +1168,7 @@ function selectModelForTask(
     return { targetModel: requestedModel, reason: `Explicit user selection: ${requestedModel}` };
   }
 
-  // 1. Complex Tasks -> gemini-3.1-pro-preview
+  // 1. Complex Tasks -> Primary Model (e.g. openai/gpt-oss-120b or llama-3.3-70b-versatile)
   const isComplex =
     state.currentIntent === 'complaint_escalation' ||
     state.sentiment === 'angry' ||
@@ -1156,26 +1178,26 @@ function selectModelForTask(
 
   if (isComplex) {
     return {
-      targetModel: 'gemini-3.5-flash',
+      targetModel: DEFAULT_GROQ_MODEL,
       reason: 'Complex Task: High-sentiment escalation, billing dispute, or complex clinical inquiry handled with deep reasoning.',
     };
   }
 
-  // 2. Fast Tasks -> gemini-3.1-flash-lite
+  // 2. Fast Tasks -> High-speed Model (e.g. openai/gpt-oss-20b or llama-3.1-8b-instant)
   const isFast =
     (state.currentIntent === 'info_query' && message.length < 90) ||
     /^(hi|hello|hey|hours|where|cost|price|slots|open|available)\b/i.test(message.trim());
 
   if (isFast) {
     return {
-      targetModel: 'gemini-3.1-flash-lite',
+      targetModel: 'openai/gpt-oss-20b',
       reason: 'Fast Task: Quick informational FAQ or slot query optimized for minimal response latency.',
     };
   }
 
-  // 3. General Tasks -> gemini-3.5-flash
+  // 3. General Tasks -> Default Model
   return {
-    targetModel: 'gemini-3.5-flash',
+    targetModel: DEFAULT_GROQ_MODEL,
     reason: 'General Task: Standard multi-turn appointment booking or rescheduling flow.',
   };
 }
@@ -1199,231 +1221,191 @@ app.post('/api/chat', async (req, res) => {
     const updatedState = analyzeUserIntentAndState(message, history, state);
     const toolsExecuted: any[] = [];
 
-    // Select the appropriate Gemini model
+    // Select the appropriate model
     const selection = selectModelForTask(model, message, updatedState);
     let chosenModel = selection.targetModel;
     let actualModelUsed = chosenModel;
 
-    // Step 2: Check for Gemini API Key
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Step 2: Check for Groq API Key
+    const apiKey = process.env.GROQ_API_KEY;
 
-    if (apiKey && apiKey !== 'MY_GEMINI_API_KEY' && apiKey.trim().length > 5) {
+    if (apiKey && apiKey !== 'MY_GROQ_API_KEY' && apiKey.trim().length > 5) {
       try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-            timeout: 30000,
-          },
+        const groq = new Groq({
+          apiKey: apiKey.trim(),
+          timeout: 30000,
         });
 
         const systemInstruction = getSystemInstructionForRole(role, customInstruction, updatedState);
 
-        // Prepare multi-turn contents for Gemini
-        const formattedContents: any[] = [];
-        for (const h of history.slice(-10)) {
-          if (!h.content || typeof h.content !== 'string') continue;
-          formattedContents.push({
-            role: h.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: h.content }],
-          });
-        }
-        formattedContents.push({
-          role: 'user',
-          parts: [{ text: message }],
-        });
-
-        const toolDeclarations = [
-          lookupAppointmentDeclaration,
-          getAvailableSlotsDeclaration,
-          bookAppointmentDeclaration,
-          rescheduleAppointmentDeclaration,
-          cancelAppointmentDeclaration,
-          escalateToHumanDeclaration,
-          getBusinessInfoDeclaration,
+        // Prepare multi-turn messages for Groq
+        const formattedMessages: Groq.Chat.Completions.ChatCompletionMessageParam[] = [
+          { role: 'system', content: systemInstruction },
         ];
 
-        // Execute Gemini call with auto-fallback for quota and high demand spikes
-        let geminiResponse: any;
-        try {
-          geminiResponse = await ai.models.generateContent({
-            model: chosenModel,
-            contents: formattedContents,
-            config: {
-              systemInstruction,
-              tools: [{ functionDeclarations: toolDeclarations }],
-            },
+        for (const h of history.slice(-10)) {
+          if (!h.content || typeof h.content !== 'string') continue;
+          formattedMessages.push({
+            role: h.role === 'assistant' ? 'assistant' : 'user',
+            content: h.content,
           });
-        } catch (callErr: any) {
-          // If gemini-3.1-pro-preview exceeded quota or unavailable on free tier, fallback to gemini-3.5-flash
-          if (chosenModel === 'gemini-3.1-pro-preview' && (callErr?.status === 429 || callErr?.message?.includes('quota') || callErr?.status === 404)) {
-            console.warn('gemini-3.1-pro-preview quota exceeded on free tier. Gracefully falling back to gemini-3.5-flash for complex task.');
-            chosenModel = 'gemini-3.5-flash';
-            actualModelUsed = 'gemini-3.5-flash (pro fallback)';
-            try {
-              geminiResponse = await ai.models.generateContent({
-                model: chosenModel,
-                contents: formattedContents,
-                config: {
-                  systemInstruction,
-                  tools: [{ functionDeclarations: toolDeclarations }],
-                },
-              });
-            } catch (flashErr: any) {
-              console.warn('gemini-3.5-flash busy, falling back to gemini-3.1-flash-lite');
-              chosenModel = 'gemini-3.1-flash-lite';
-              actualModelUsed = 'gemini-3.1-flash-lite (fast fallback)';
-              geminiResponse = await ai.models.generateContent({
-                model: chosenModel,
-                contents: formattedContents,
-                config: {
-                  systemInstruction,
-                  tools: [{ functionDeclarations: toolDeclarations }],
-                },
-              });
-            }
-          } else if (callErr?.status === 503 || callErr?.status === 429 || callErr?.message?.includes('high demand') || callErr?.message?.includes('quota')) {
-            // If temporary 503 high demand or quota on current model, fall back to gemini-3.1-flash-lite
-            console.warn(`Model ${chosenModel} returned ${callErr?.status || 'high demand'}, falling back to gemini-3.1-flash-lite.`);
-            chosenModel = 'gemini-3.1-flash-lite';
-            actualModelUsed = 'gemini-3.1-flash-lite (demand fallback)';
-            geminiResponse = await ai.models.generateContent({
-              model: chosenModel,
-              contents: formattedContents,
-              config: {
-                systemInstruction,
-                tools: [{ functionDeclarations: toolDeclarations }],
-              },
-            });
-          } else {
-            throw callErr;
-          }
         }
+        formattedMessages.push({
+          role: 'user',
+          content: message,
+        });
 
-        // Check if function calls were requested by Gemini
-        const functionCalls = geminiResponse.functionCalls;
-        if (functionCalls && functionCalls.length > 0) {
-          const functionResponses: any[] = [];
+        // Priority candidate models for graceful fallback if chosen model encounters 429 / quota / availability
+        const candidateModels = [
+          chosenModel,
+          DEFAULT_GROQ_MODEL,
+          'openai/gpt-oss-120b',
+          'openai/gpt-oss-20b',
+          'llama-3.3-70b-versatile',
+          'llama-3.1-8b-instant',
+        ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-          for (const call of functionCalls) {
-            const toolName = call.name || 'unknown_tool';
-            const result = executeTool(toolName, (call.args as any) || {});
-            toolsExecuted.push({
-              name: toolName,
-              args: call.args,
-              result,
-              timestamp: new Date().toISOString(),
-              status: 'success',
-            });
-            functionResponses.push({
-              name: toolName,
-              response: { result },
-            });
+        let completion: any = null;
+        let successfulModel = chosenModel;
 
-            // Synchronize state flags
-            if (toolName === 'escalate_to_human') {
-              updatedState.isEscalated = true;
-              updatedState.currentIntent = 'complaint_escalation';
-              updatedState.flowStage = 'escalated_to_human';
-            } else if (toolName === 'book_appointment' && result.status === 'confirmed') {
-              updatedState.flowStage = 'completed';
-              updatedState.lastFunctionExecuted = 'book_appointment';
-              if (result.appointment?.customerName) updatedState.extractedParams.customerName = result.appointment.customerName;
-              if (result.appointment?.contact) updatedState.extractedParams.contact = result.appointment.contact;
-            } else if (toolName === 'reschedule_appointment' && result.status === 'rescheduled') {
-              updatedState.flowStage = 'completed';
-              updatedState.lastFunctionExecuted = 'reschedule_appointment';
-            } else if (toolName === 'cancel_appointment') {
-              updatedState.flowStage = 'completed';
-              updatedState.lastFunctionExecuted = 'cancel_appointment';
-            }
-          }
-
-          // Follow-up call with tool outputs to generate natural human-facing reply
-          const followUpContents = [
-            ...formattedContents,
-            geminiResponse.candidates?.[0]?.content,
-            {
-              role: 'tool',
-              parts: functionResponses.map((fr) => ({
-                functionResponse: fr,
-              })),
-            },
-          ];
-
-          let followUpResponse: any;
+        for (const modelCandidate of candidateModels) {
           try {
-            followUpResponse = await ai.models.generateContent({
-              model: chosenModel,
-              contents: followUpContents,
-              config: { systemInstruction },
+            completion = await groq.chat.completions.create({
+              model: modelCandidate,
+              messages: formattedMessages,
+              tools: groqTools,
+              tool_choice: 'auto',
+              temperature: 0.2,
+              max_tokens: 1024,
             });
-          } catch (fuErr: any) {
-            console.warn(`Follow-up with ${chosenModel} failed (${fuErr?.message}), retrying with gemini-3.1-flash-lite`);
-            try {
-              followUpResponse = await ai.models.generateContent({
-                model: 'gemini-3.1-flash-lite',
-                contents: followUpContents,
-                config: { systemInstruction },
-              });
-            } catch (fuErr2: any) {
-              console.warn('Follow-up text formatting experienced high demand, synthesizing directly from executed tool output.');
+            successfulModel = modelCandidate;
+            break;
+          } catch (callErr: any) {
+            console.warn(`Groq request failed with model ${modelCandidate} (${callErr?.status || callErr?.message}).`);
+            if (callErr?.status === 401) {
+              // Authentication error: stop trying models
+              throw callErr;
             }
           }
+        }
 
-          let finalReply = followUpResponse?.text;
-          if (!finalReply) {
-            // Synthesize clear, professional response from executed tool results
-            const primaryTool = toolsExecuted[0];
-            if (primaryTool) {
-              if (primaryTool.name === 'escalate_to_human') {
-                finalReply = `I sincerely apologize for the frustration and trouble you have experienced. I have immediately triggered our human escalation protocol. Escalation Ticket #${primaryTool.result.ticket_id} has been created with ${primaryTool.result.escalation?.urgency || 'high'} priority. A clinic supervisor has been notified and will contact you directly to resolve this.`;
-              } else if (primaryTool.name === 'book_appointment' && primaryTool.result.status === 'confirmed') {
-                finalReply = `Your appointment has been successfully scheduled! Confirmation ID: ${primaryTool.result.booking_id} for ${primaryTool.result.appointment.customerName} on ${primaryTool.result.appointment.date} at ${primaryTool.result.appointment.timeSlot} (${primaryTool.result.appointment.serviceType}).`;
-              } else if (primaryTool.name === 'reschedule_appointment' && primaryTool.result.status === 'rescheduled') {
-                finalReply = `Your appointment (${primaryTool.result.booking_id}) has been successfully rescheduled to ${primaryTool.result.appointment.date} at ${primaryTool.result.appointment.timeSlot}.`;
-              } else if (primaryTool.name === 'cancel_appointment') {
-                finalReply = `Your appointment (${primaryTool.result.booking_id}) has been cancelled as requested. If you need to rebook in the future, we are always here to help.`;
-              } else if (primaryTool.name === 'get_available_slots') {
-                finalReply = `For ${primaryTool.result.date}, the available time slots are: ${primaryTool.result.available_slots.join(', ')}. Which time would work best for you?`;
-              } else if (primaryTool.name === 'get_business_info') {
-                finalReply = primaryTool.result.info;
-              } else {
-                finalReply = primaryTool.result.message || 'Action processed successfully.';
+        if (completion && completion.choices && completion.choices.length > 0) {
+          actualModelUsed = successfulModel;
+          const choice = completion.choices[0];
+          const assistantMessage = choice.message;
+
+          // Check if function/tool calls were requested by Groq
+          if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+            formattedMessages.push(assistantMessage);
+
+            for (const toolCall of assistantMessage.tool_calls) {
+              const toolName = toolCall.function.name;
+              let parsedArgs: Record<string, any> = {};
+              try {
+                parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
+              } catch {
+                parsedArgs = {};
               }
-            } else {
-              finalReply = 'Action processed successfully.';
+
+              const result = executeTool(toolName, parsedArgs);
+              toolsExecuted.push({
+                name: toolName,
+                args: parsedArgs,
+                result,
+                timestamp: new Date().toISOString(),
+                status: 'success',
+              });
+
+              formattedMessages.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                content: JSON.stringify(result),
+              });
+
+              // Synchronize state flags
+              if (toolName === 'escalate_to_human') {
+                updatedState.isEscalated = true;
+                updatedState.currentIntent = 'complaint_escalation';
+                updatedState.flowStage = 'escalated_to_human';
+              } else if (toolName === 'book_appointment' && result.status === 'confirmed') {
+                updatedState.flowStage = 'completed';
+                updatedState.lastFunctionExecuted = 'book_appointment';
+                if (result.appointment?.customerName) updatedState.extractedParams.customerName = result.appointment.customerName;
+                if (result.appointment?.contact) updatedState.extractedParams.contact = result.appointment.contact;
+              } else if (toolName === 'reschedule_appointment' && result.status === 'rescheduled') {
+                updatedState.flowStage = 'completed';
+                updatedState.lastFunctionExecuted = 'reschedule_appointment';
+              } else if (toolName === 'cancel_appointment') {
+                updatedState.flowStage = 'completed';
+                updatedState.lastFunctionExecuted = 'cancel_appointment';
+              }
             }
+
+            // Follow-up call with tool outputs to generate natural patient-facing reply
+            let followUpResponse: any = null;
+            try {
+              followUpResponse = await groq.chat.completions.create({
+                model: successfulModel,
+                messages: formattedMessages,
+                temperature: 0.2,
+                max_tokens: 1024,
+              });
+            } catch (fuErr: any) {
+              console.warn(`Groq follow-up response formatting experienced high demand (${fuErr?.message}), synthesizing directly from executed tool output.`);
+            }
+
+            let finalReply = followUpResponse?.choices?.[0]?.message?.content;
+            if (!finalReply) {
+              // Synthesize clear, professional response from executed tool results
+              const primaryTool = toolsExecuted[0];
+              if (primaryTool) {
+                if (primaryTool.name === 'escalate_to_human') {
+                  finalReply = `I sincerely apologize for the frustration and trouble you have experienced. I have immediately triggered our human escalation protocol.\n\n• **Escalation Ticket:** #${primaryTool.result.ticket_id}\n• **Priority Level:** ${primaryTool.result.escalation?.urgency || 'High'}\n• **Status:** Active Dispatch\n\nA clinic supervisor has been alerted and will contact you directly to resolve this promptly.`;
+                } else if (primaryTool.name === 'book_appointment' && primaryTool.result.status === 'confirmed') {
+                  finalReply = `### Appointment Successfully Confirmed 🎉\n\n• **Confirmation ID:** \`${primaryTool.result.booking_id}\`\n• **Patient:** ${primaryTool.result.appointment.customerName}\n• **Service:** ${primaryTool.result.appointment.serviceType}\n• **Date & Time:** **${primaryTool.result.appointment.date}** at **${primaryTool.result.appointment.timeSlot}**\n• **Clinic Location:** 742 Evergreen Wellness Plaza, Suite 300\n\nPlease arrive 10 minutes prior to your session. We look forward to seeing you!`;
+                } else if (primaryTool.name === 'reschedule_appointment' && primaryTool.result.status === 'rescheduled') {
+                  finalReply = `### Appointment Successfully Rescheduled ✅\n\n• **Booking ID:** \`${primaryTool.result.booking_id}\`\n• **New Date:** **${primaryTool.result.appointment.date}**\n• **New Time Slot:** **${primaryTool.result.appointment.timeSlot}**\n\nYour updated calendar reservation is confirmed.`;
+                } else if (primaryTool.name === 'cancel_appointment') {
+                  finalReply = `### Appointment Cancelled ℹ️\n\n• **Booking Reference:** \`${primaryTool.result.booking_id}\`\n• **Status:** Cancelled\n\nYour appointment has been removed from the schedule. If you would like to book a new appointment at any time, simply let me know!`;
+                } else if (primaryTool.name === 'get_available_slots') {
+                  finalReply = `Available time slots for **${primaryTool.result.date}**:\n\n${primaryTool.result.available_slots.map((s: string) => `• \`${s}\``).join('\n')}\n\nWhich time slot works best for your schedule?`;
+                } else if (primaryTool.name === 'get_business_info') {
+                  finalReply = primaryTool.result.info;
+                } else {
+                  finalReply = primaryTool.result.message || 'Action processed successfully.';
+                }
+              } else {
+                finalReply = 'Action processed successfully.';
+              }
+            }
+
+            return res.json({
+              reply: finalReply,
+              modelUsed: actualModelUsed,
+              routingReason: selection.reason,
+              intent: updatedState.currentIntent,
+              state: updatedState,
+              toolsExecuted,
+              isEscalated: updatedState.isEscalated,
+            });
           }
 
-          return res.json({
-            reply: finalReply,
-            modelUsed: actualModelUsed,
-            routingReason: selection.reason,
-            intent: updatedState.currentIntent,
-            state: updatedState,
-            toolsExecuted,
-            isEscalated: updatedState.isEscalated,
-          });
+          // Direct text reply from Groq
+          const directText = assistantMessage.content;
+          if (directText) {
+            return res.json({
+              reply: directText,
+              modelUsed: actualModelUsed,
+              routingReason: selection.reason,
+              intent: updatedState.currentIntent,
+              state: updatedState,
+              toolsExecuted,
+              isEscalated: updatedState.isEscalated,
+            });
+          }
         }
-
-        // Direct text reply from Gemini
-        const directText = geminiResponse.text;
-        if (directText) {
-          return res.json({
-            reply: directText,
-            modelUsed: actualModelUsed,
-            routingReason: selection.reason,
-            intent: updatedState.currentIntent,
-            state: updatedState,
-            toolsExecuted,
-            isEscalated: updatedState.isEscalated,
-          });
-        }
-      } catch (geminiError: any) {
-        console.error('DEBUG_GEMINI_ERROR:', geminiError?.status, geminiError?.message, geminiError?.stack);
+      } catch (groqError: any) {
+        console.error('Groq API request failed:', groqError?.status || '', groqError?.message || '');
         // Fall back to robust deterministic agent logic
       }
     }

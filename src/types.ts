@@ -8,9 +8,10 @@ export type IntentType =
 
 export type AIModelId =
   | 'auto'
-  | 'gemini-3.5-flash'
-  | 'gemini-3.1-flash-lite'
-  | 'gemini-3.1-pro-preview';
+  | 'openai/gpt-oss-120b'
+  | 'openai/gpt-oss-20b'
+  | 'llama-3.3-70b-versatile'
+  | 'llama-3.1-8b-instant';
 
 export type AgentRolePreset =
   | 'clinic_specialist'

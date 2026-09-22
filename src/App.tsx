@@ -34,7 +34,7 @@ export default function App() {
       id: 'welcome-msg',
       role: 'assistant',
       content:
-        "Welcome to Lumina Care & Wellness. I am your concierge assistant for appointment scheduling, general clinic inquiries, and member services.\n\nHow may I assist you today?\n• Check clinic operating hours, services & pricing\n• Book a new appointment (e.g. Executive Health, Physiotherapy, Dental)\n• Reschedule or modify an existing reservation\n• Cancel an appointment\n• Request direct transfer to a clinical supervisor",
+        "Welcome to **Lumina Care & Wellness**. I am your clinical concierge assistant for appointment scheduling, service inquiries, and care coordination.\n\n### How I Can Help You Today:\n• **Check Clinic Information:** Operating hours, clinic location, accepted insurances, and service pricing.\n• **Book an Appointment:** Comprehensive Dental, Physiotherapy, Executive Health Screening, Massage, or Hair Styling.\n• **Manage Existing Reservations:** Look up, reschedule, or cancel confirmed appointments.\n• **Escalate to Supervisor:** Immediate transfer to clinical duty leads for complex inquiries or disputes.\n\nHow may I assist you today?",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       intent: 'info_query',
     },

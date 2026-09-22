@@ -21,6 +21,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { ChatMessage, IntentType, AIModelId, AgentRolePreset } from '../types';
+import { FormattedMessage } from './FormattedMessage';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -145,9 +146,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const getModelBadge = (modelUsed?: string) => {
     if (!modelUsed) return null;
-    let label = 'Standard Model';
-    if (modelUsed.includes('lite') || modelUsed.includes('Speed')) label = 'High-Speed';
-    else if (modelUsed.includes('pro') || modelUsed.includes('Advanced')) label = 'Advanced';
+    let label = modelUsed;
+    if (modelUsed.includes('120b')) label = 'Groq GPT-OSS 120B';
+    else if (modelUsed.includes('20b')) label = 'Groq GPT-OSS 20B';
+    else if (modelUsed.includes('70b')) label = 'Groq Llama 3.3 70B';
+    else if (modelUsed.includes('8b')) label = 'Groq Llama 3.1 8B';
+    else if (modelUsed === 'deterministic-fallback') label = 'Deterministic Engine';
 
     return (
       <span className="inline-flex items-center gap-1 text-[10px] font-code text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
@@ -193,9 +197,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               className="bg-transparent font-semibold text-slate-800 focus:outline-none cursor-pointer text-xs"
             >
               <option value="auto">Auto (Task-Adaptive)</option>
-              <option value="gemini-3.5-flash">Standard (Conversational)</option>
-              <option value="gemini-3.1-flash-lite">High-Speed (Fast Tasks)</option>
-              <option value="gemini-3.1-pro-preview">Advanced (Complex Queries)</option>
+              <option value="openai/gpt-oss-120b">GPT-OSS 120B (Primary / Reasoning)</option>
+              <option value="openai/gpt-oss-20b">GPT-OSS 20B (High-Speed / Efficient)</option>
+              <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+              <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
             </select>
           </div>
 
@@ -278,7 +283,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     : 'bg-white text-slate-900 border border-[#E5E7EB] rounded-tl-none shadow-xs'
                 }`}
               >
-                <div className="whitespace-pre-wrap">{msg.content}</div>
+                <FormattedMessage content={msg.content} isUser={isUser} />
 
                 {/* Tool Execution Receipt (Audit record) */}
                 {msg.functionCalls && msg.functionCalls.length > 0 && (
